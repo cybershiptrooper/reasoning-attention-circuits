@@ -72,3 +72,8 @@ website
 !configs/**/*.yaml
 !expts/**/*rollouts*.py
 !utils/**/*rollouts*.py
+
+# Backup/restore tooling (backup/README.md)
+!backup/
+!backup/**
+backup/__pycache__/
