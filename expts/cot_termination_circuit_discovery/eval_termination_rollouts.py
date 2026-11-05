@@ -217,6 +217,8 @@ def main():
     ap.add_argument("--mask_path", required=True)
     ap.add_argument("--bank_path", required=True)
     ap.add_argument("--model_name", default="Qwen/Qwen3-8B")
+    ap.add_argument("--device", default="cuda",
+                    help='"auto" spreads the model over all visible GPUs (Qwen3-32B)')
     ap.add_argument("--n_rollouts", type=int, default=32)
     ap.add_argument("--horizon", type=int, default=512)
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -278,7 +280,7 @@ def main():
     num_sents = len(sentences)
     prefix_len = prefix_ids.shape[-1]
 
-    model, _ = load_model_eager(args.model_name, device="cuda")
+    model, _ = load_model_eager(args.model_name, device=args.device)
     device = next(model.parameters()).device
     layers = list(range(model.config.num_hidden_layers))
     num_heads = model.config.num_attention_heads

@@ -63,6 +63,8 @@ def compute_suppression_scores(
     sentence_gap,
     backend: str = "sdpa",
     chunk: int = KL_CHUNK,
+    *,
+    memory_efficient_binary_mask: bool = False,
 ) -> List[List[float]]:
     """scores[src][tgt] = mean KL at sentence src when attention to tgt is
     suppressed (higher = tgt more important for src). See the module
@@ -90,8 +92,16 @@ def compute_suppression_scores(
     ones_mask = torch.ones(num_heads, num_sents, num_sents, device=device)
     binary_masks = {layer: ones_mask for layer in all_layers}
     install = install_sdpa_mask_hooks if backend == "sdpa" else install_mask_hooks
-    handles = install(model, all_layers, binary_masks, token_to_sent, gap_filter,
-                      renormalize=True)
+    if memory_efficient_binary_mask:
+        if backend != "sdpa":
+            raise ValueError("memory_efficient_binary_mask requires backend='sdpa'")
+        handles = install(
+            model, all_layers, binary_masks, token_to_sent, gap_filter,
+            renormalize=True, memory_efficient_binary_mask=True,
+        )
+    else:
+        handles = install(model, all_layers, binary_masks, token_to_sent, gap_filter,
+                          renormalize=True)
 
     # suppression_kl[i][j] = KL at sentence j when attention to i is suppressed
     suppression_kl = [[0.0] * num_sents for _ in range(num_sents)]

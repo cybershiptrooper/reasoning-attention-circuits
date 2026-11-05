@@ -196,11 +196,17 @@ class NodewiseSubnetworkProbingBoundaryHazardBatched(
         for layer in base.layers:
             def _layer_fn(h, _layer=layer):
                 attn = _layer.self_attn
+                # device_map="auto" (Qwen3-32B over 2 GPUs): the K/V
+                # recompute calls submodules directly, so move the input
+                # and RoPE tables to this layer's device first.
+                ldev = attn.k_proj.weight.device
+                h = h.to(ldev)
+                c, s = cos.to(ldev), sin.to(ldev)
                 hs = _layer.input_layernorm(h)
                 k = attn.k_proj(hs).view(1, P, n_kv, head_dim)
                 k = attn.k_norm(k).transpose(1, 2)
                 v = attn.v_proj(hs).view(1, P, n_kv, head_dim).transpose(1, 2)
-                _, k = apply_rotary_pos_emb(k, k, cos, sin)
+                _, k = apply_rotary_pos_emb(k, k, c, s)
                 # NB: call .forward directly. In transformers >= 4.56 the
                 # decoder layer's __call__ (GradientCheckpointingLayer)
                 # intercepts when gradient checkpointing is enabled and the
@@ -297,13 +303,18 @@ class NodewiseSubnetworkProbingBoundaryHazardBatched(
                 hidden = self._forward_candidates(
                     ids, kv_per_layer, prefix_len,
                 )
+                # .to() calls are no-ops on one GPU; with device_map="auto"
+                # the final hidden states live on the last layer's device.
+                hdev = hidden.device
+                lm_w_h = lm_w.to(hdev)
+                event_ids = self._event_token_ids.to(hdev)
                 for row, i in enumerate(bucket):
-                    rows = hidden[row, self._bd_positions[i]]      # (B_i, d)
-                    logits = (rows @ lm_w.T).float()               # fp32
+                    rows = hidden[row, self._bd_positions[i].to(hdev)]  # (B_i, d)
+                    logits = (rows @ lm_w_h.T).float()             # fp32
                     log_probs = torch.log_softmax(logits, dim=-1)
                     log_h_list[i] = torch.logsumexp(
-                        log_probs[:, self._event_token_ids], dim=-1,
-                    )
+                        log_probs[:, event_ids], dim=-1,
+                    ).to(device)
                 del hidden
 
         # Per-boundary gradient hooks reproduce the parent's pass-1 weight

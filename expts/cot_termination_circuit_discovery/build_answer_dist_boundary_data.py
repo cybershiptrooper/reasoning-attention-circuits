@@ -49,6 +49,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--boundary_data_path", required=True)
     ap.add_argument("--model_name", default="Qwen/Qwen3-8B")
+    ap.add_argument("--device", default="cuda",
+                    help='"auto" spreads the model over all visible GPUs (Qwen3-32B)')
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--output_dir", required=True)
     args = ap.parse_args()
@@ -59,7 +61,7 @@ def main():
     stem = os.path.splitext(os.path.basename(args.boundary_data_path))[0]
     all_letters = bank.get("all_letters") or ["A", "B", "C", "D"]
 
-    model, tokenizer = load_model_eager(args.model_name, device="cuda")
+    model, tokenizer = load_model_eager(args.model_name, device=args.device)
     install_clean_sdpa_forward(model)
     device = next(model.parameters()).device
     suffix_ids = tokenizer.encode(PROBE_SUFFIX_TEXT, add_special_tokens=False)

@@ -269,6 +269,16 @@ def main():
     ap.add_argument("--min_target_cluster", type=int, default=2)
     ap.add_argument("--n_train", type=int, default=12)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--exclude_scan", nargs="*", default=[],
+                    help="scan_early.json files of earlier scans; their "
+                    "SELECTED (data_path, prompt_index) pairs are not scanned "
+                    "again (used to add prompts to an existing pool).")
+    ap.add_argument("--max_total", type=int, default=None,
+                    help="cap on the total number of selected prompts, filled "
+                    "round-robin over datasets in their ranking order (a "
+                    "dataset with fewer eligible prompts leaves its share to "
+                    "the others).")
+    ap.add_argument("--tensor_parallel_size", type=int, default=1)
     ap.add_argument("--output_dir", required=True)
     args = ap.parse_args()
 
@@ -282,12 +292,21 @@ def main():
     suffix_ids = tokenizer.encode(PROBE_SUFFIX_TEXT, add_special_tokens=False)
 
     # ---- candidate prompts per dataset, accuracy band first ----
+    excluded = set()
+    for path in args.exclude_scan:
+        with open(path) as f:
+            for p in json.load(f)["selected"]:
+                excluded.add((os.path.normpath(p["data_path"]), p["prompt_index"]))
+    if excluded:
+        print(f"Excluding {len(excluded)} prompts selected by earlier scans")
     by_dataset: dict[str, list] = {}
     for dp in args.data_paths:
         with open(dp) as f:
             records = json.load(f)
         n_band = 0
         for pi, rec in enumerate(records):
+            if (os.path.normpath(dp), pi) in excluded:
+                continue
             acc = record_accuracy(rec)
             if acc is None or not (args.accuracy_min <= acc <= args.accuracy_max):
                 continue
@@ -313,6 +332,7 @@ def main():
           f"offset {args.offset_tokens}")
 
     llm = LLM(model=args.model_name, gpu_memory_utilization=0.9,
+              tensor_parallel_size=args.tensor_parallel_size,
               max_model_len=args.max_prefix_tokens + args.horizon + 64,
               seed=args.seed)
     sp = SamplingParams(n=args.n_samples, max_tokens=args.horizon,
@@ -350,15 +370,32 @@ def main():
 
     # ---- selection: most answer-diverse first, per dataset ----
     selected, skipped = [], []
+    ranked = {}
     for ds in sorted({dataset_key(dp) for dp in args.data_paths}):
         cands = [p for p in by_key.values() if dataset_key(p["data_path"]) == ds]
         good = [p for p in cands if eligible(p, args.min_target_cluster)]
         good.sort(key=lambda p: (-p["n_distinct_answers"],
                                  p["majority_answer_fraction"]))
-        selected.extend(good[: args.per_dataset])
-        skipped.extend([p for p in cands if p not in good[: args.per_dataset]])
+        ranked[ds] = (cands, good[: args.per_dataset])
         print(f"dataset {ds}: {len(good)} eligible of {len(cands)} scanned, "
-              f"keeping {min(len(good), args.per_dataset)}")
+              f"at most {min(len(good), args.per_dataset)} kept")
+    if args.max_total is None:
+        keep = {ds: good for ds, (_, good) in ranked.items()}
+    else:
+        keep = {ds: [] for ds in ranked}
+        rank = 0
+        n_kept = 0
+        while n_kept < args.max_total and any(
+                rank < len(good) for _, good in ranked.values()):
+            for ds, (_, good) in ranked.items():
+                if rank < len(good) and n_kept < args.max_total:
+                    keep[ds].append(good[rank])
+                    n_kept += 1
+            rank += 1
+    for ds, (cands, _) in ranked.items():
+        selected.extend(keep[ds])
+        skipped.extend([p for p in cands if p not in keep[ds]])
+        print(f"dataset {ds}: keeping {len(keep[ds])}")
 
     # ---- scan record (samples included — banks are built from these) ----
     def strip(pair, with_samples):

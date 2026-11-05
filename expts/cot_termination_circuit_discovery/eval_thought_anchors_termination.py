@@ -62,6 +62,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bank_path", required=True)
     ap.add_argument("--model_name", default="Qwen/Qwen3-8B")
+    ap.add_argument("--device", default="cuda",
+                    help='"auto" spreads the model over all visible GPUs (Qwen3-32B)')
     ap.add_argument("--target_sparsities", nargs="*", type=float,
                     default=[0.1])
     ap.add_argument("--n_rollouts", type=int, default=16)
@@ -87,6 +89,13 @@ def main():
                     "prompt and sentence gap instead of rescoring: a rollout-eval "
                     "JSON from this script (key 'ta_scores') or a score-mask JSON "
                     "(key 'scores').")
+    ap.add_argument("--save_scores", default=None,
+                    help="Also write the scores as a score-mask JSON (mask_type "
+                    "thought_anchors_scores), the format read by --scores_path "
+                    "and by the trainers' log_alpha_init_mask_path warm start.")
+    ap.add_argument("--memory_efficient_binary_mask", action="store_true",
+                    help="Opt in to in-place binary-mask conversion during SDPA "
+                         "Thought Anchors scoring; default uses the original converter.")
     ap.add_argument("--output_dir", required=True)
     args = ap.parse_args()
     set_seed(args.seed)
@@ -123,7 +132,7 @@ def main():
     num_sents = len(sentences)
     prefix_len = prefix_ids.shape[-1]
 
-    model, _ = load_model_eager(args.model_name, device="cuda")
+    model, _ = load_model_eager(args.model_name, device=args.device)
     device = next(model.parameters()).device
     layers = list(range(model.config.num_hidden_layers))
     num_heads = model.config.num_attention_heads
@@ -152,7 +161,26 @@ def main():
         scores = compute_suppression_scores(
             model, prefix_ids, sentences, t2s_prefix, args.sentence_gap,
             backend="sdpa",
+            **({"memory_efficient_binary_mask": True}
+               if args.memory_efficient_binary_mask else {}),
         )
+    if args.save_scores:
+        os.makedirs(os.path.dirname(args.save_scores) or ".", exist_ok=True)
+        with open(args.save_scores, "w") as f:
+            json.dump({
+                "mask_type": "thought_anchors_scores",
+                "scores": scores,
+                "metadata": {
+                    "score_readout": "raw_score",
+                    "sentence_gap": args.sentence_gap,
+                    "num_frozen_prompt_sentences": num_prompt_sentences,
+                    "model_name": args.model_name,
+                    "source": args.bank_path,
+                    **({"memory_efficient_binary_mask": True}
+                       if args.memory_efficient_binary_mask else {}),
+                },
+            }, f)
+        print(f"wrote scores to {args.save_scores}", flush=True)
     scores_t = torch.tensor(scores, dtype=torch.float32, device=device)
 
     # ---- filters: prompt sentences are never maskable, matching training

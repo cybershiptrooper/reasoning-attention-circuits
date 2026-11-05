@@ -23,6 +23,7 @@ from utils.circuit_discovery.common import (
 )
 from utils.circuit_discovery.sdpa_forward import (
     make_sdpa_attention_forward,
+    _expand_mask_to_additive_memory_efficient,
 )
 from utils.circuit_discovery.base import AblationHandle
 
@@ -323,6 +324,8 @@ def install_sdpa_mask_hooks(
     token_to_sent: torch.Tensor,
     gap_filter: torch.Tensor,
     renormalize: bool,
+    *,
+    memory_efficient_binary_mask: bool = False,
 ) -> list[AblationHandle]:
     """SDPA equivalent of ``install_mask_hooks`` for *binary* masks.
 
@@ -337,7 +340,13 @@ def install_sdpa_mask_hooks(
     compatibility but has no separate effect under SDPA (softmax *is*
     the renormalization).
     """
-    forward_fn = make_sdpa_attention_forward(model.config.model_type)
+    if memory_efficient_binary_mask:
+        forward_fn = make_sdpa_attention_forward(
+            model.config.model_type,
+            mask_converter=_expand_mask_to_additive_memory_efficient,
+        )
+    else:
+        forward_fn = make_sdpa_attention_forward(model.config.model_type)
     handles: list[AblationHandle] = []
     for layer_idx in layers:
         attn_module = get_attention_module(model, layer_idx)

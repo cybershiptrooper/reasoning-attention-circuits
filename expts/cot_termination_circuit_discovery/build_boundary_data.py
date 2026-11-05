@@ -172,6 +172,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bank_path", required=True)
     ap.add_argument("--model_name", default="Qwen/Qwen3-8B")
+    ap.add_argument("--device", default="cuda",
+                    help='"auto" spreads the model over all visible GPUs (Qwen3-32B)')
     ap.add_argument("--min_sentence_length", type=int, default=10)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--output", required=True)
@@ -187,7 +189,7 @@ def main():
     trace_answer = (bank["trace_answer"] or "").strip()
     all_letters = bank.get("all_letters") or ["A", "B", "C", "D"]
 
-    model, tokenizer = load_model_eager(args.model_name, device="cuda")
+    model, tokenizer = load_model_eager(args.model_name, device=args.device)
     # Route forwards through the SDPA attention path (no mask installed, so
     # numerically a no-op) — eager attention materialises the full
     # attention matrix and runs out of memory on the long early-analysis-

@@ -101,6 +101,50 @@ def _expand_mask_to_additive(
     return additive.unsqueeze(0)  # (1, H, q_len, k_len)
 
 
+def _expand_mask_to_additive_memory_efficient(
+    module,
+    q_len: int,
+    k_len: int,
+    cache_position: Optional[torch.Tensor],
+    dtype: torch.dtype,
+) -> Optional[torch.Tensor]:
+    """Opt-in, non-differentiable conversion that reuses expanded mask storage.
+
+    Returns ``(1, H, q_len, k_len)`` with 0.0 for attend and ``min_dtype``
+    for mask-out, or *None* when no circuit mask is set.
+
+    **Fast path**: If all query tokens are continuation tokens (i.e.
+    ``token_to_sent == -1``), the mask is all-ones and we return *None*,
+    avoiding a huge allocation on long sequences.
+    """
+    mask = getattr(module, "_circuit_mask", None)
+    token_to_sent = getattr(module, "_token_to_sent", None)
+    gap_filter = getattr(module, "_gap_filter", None)
+
+    if mask is None or token_to_sent is None:
+        return None
+
+    # Fast path: if every query is outside all sentences → mask is all-ones
+    if cache_position is not None:
+        q_sent = token_to_sent[cache_position.to(token_to_sent.device).long()]
+        if (q_sent == -1).all():
+            return None
+
+    # (num_heads, q_len, k_len) binary mask
+    binary = expand_sentence_mask_to_tokens(
+        mask, token_to_sent, gap_filter, q_len, k_len, cache_position,
+        out_dtype=dtype,
+    )
+    min_val = torch.finfo(dtype).min
+    # Advanced indexing produced fresh storage, separate from the sentence mask.
+    # This threshold converter is non-differentiable, just like the original.
+    binary = binary.detach()
+    with torch.no_grad():
+        binary.gt_(0.5).neg_().add_(1).mul_(min_val)
+        binary.add_(0.0)  # Preserve the original converter's positive zero.
+    return binary.unsqueeze(0)  # (1, H, q_len, k_len)
+
+
 def _make_llama_forward_sdpa(mask_converter: Callable = None):
     """Build SDPA-based LlamaAttention / Qwen2Attention forward.
 
