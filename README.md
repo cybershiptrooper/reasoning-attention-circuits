@@ -25,6 +25,44 @@ uv sync            # Python 3.12, dependencies from pyproject.toml / uv.lock
 - The models are `Qwen/Qwen3-8B` and `Qwen/Qwen3-32B` from the Hugging Face Hub.
 - Training loads the model with attention hooks, so one GPU is enough for 8B. For 32B, set `device: auto` to shard the model over the visible GPUs.
 
+## Restoring outputs from the backup
+
+Masks, evaluations, rollouts, data, notes and other files not in git are backed up as zstd tar shards in two private Hugging Face dataset repos. `backup/restore.sh` rebuilds the original layout from them.
+
+You need:
+- `git`, `tar`, `zstd` and `uv` on `PATH`.
+- An HF token with read access to the private repos.
+- Optionally, an Overleaf git token, used to clone the paper.
+
+```bash
+export HF_TOKEN=hf_...      # or: uv run --with huggingface_hub hf auth login
+git clone -b is_variants https://github.com/cybershiptrooper/forking-paths-clone.git /tmp/fpc
+bash /tmp/fpc/backup/restore.sh ~/work                  # core: ~3 GB download
+bash /tmp/fpc/backup/restore.sh ~/work --with-results   # also the rest of results/: +17 GB
+```
+
+The script writes the following under `~/work`:
+
+| Path | Source | Contents |
+|---|---|---|
+| `is_expts/` | GitHub clone, then the HF shards extracted on top | Core repo [`cybershiptrooper/is-expts-backup`](https://huggingface.co/datasets/cybershiptrooper/is-expts-backup): `final_results/` (every run behind the main-body figures), `paper_figure_code/`, `notes/`, `new_reports/`, `claude_scripts/`, ignored configs, `data/`, `logs/`, `cache/`. With `--with-results`, the rest of `results/` from [`cybershiptrooper/is-expts-results`](https://huggingface.co/datasets/cybershiptrooper/is-expts-results). |
+| `paper_draft/` | Overleaf clone | Skipped with a warning if there is no Overleaf token. |
+| `website/` | GitHub clone | |
+| `claude_home/` | HF | Claude Code memory. |
+
+Every shard is checked against its sha256 and per-file listing. If the restore is interrupted, rerun the same command; it skips shards that are already restored. Afterwards:
+
+```bash
+cd ~/work/is_expts && uv sync      # rebuild .venv
+# recreate .env (OPENROUTER_API_KEY, WANDB_API_KEY, RUNPOD_API_KEY); it is not backed up
+git branch -a                      # local-only branches (vm_local) and the stash come back as remotes/bundle/*
+```
+
+Old `results/...` paths of the main-body runs are symlinks into `final_results/`, so the paper's figure scripts work unchanged. See `backup/README.md` for these options:
+- `--groups` / `--exclude-groups` to restore only some groups.
+- `SKIP_WEBSITE=1` and `SKIP_OVERLEAF=1` to skip those clones.
+- How to make a new backup.
+
 ## How configs work
 
 Every training script takes `--config <file.yaml>`. Configs are loaded by `utils/expt_config.py:load_config` with these rules:
