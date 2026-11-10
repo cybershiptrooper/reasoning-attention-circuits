@@ -1,0 +1,40 @@
+# Answer preservation with Matryoshka attribution (arXiv:2609.25518,
+# github.com/aryamanarora/matryoshka-attribution): one run learns an ordering of
+# the eligible connections instead of one mask per target sparsity. Each step
+# draws a number of kept connections k ~ Uniform(1, n) and uses the sigmoid
+# top-k mask of the scores at that k. Threshold the saved scores at any sparsity
+# at evaluation time (the evaluators' top-k readout).
+# Needs the clean bank of configs/answer_kl_bank (see README).
+base_config: configs/base_answer.yaml
+masking_algorithm: nodewise_matryoshka_attribution
+objective: answer_probe_kl
+
+# No sparsity penalty and no target sparsity.
+sparsity_loss_mode: l0_mean     # unused; overrides the base's target_size_l2, which requires a target
+l0_lambda: 0.0
+optimizer: adam                 # Adam on the task loss only
+learning_rate: 0.05
+log_alpha_init: 0.0             # scores start at zero
+num_training_steps: 5000
+num_hc_samples_per_step: 1      # independent draws of k per step
+
+model_name: Qwen/Qwen3-8B
+data_path: data/collection/qwen3_8b/gpqa_filtered.json
+prompt_index: 8
+analysis_sentence_step: 80
+
+rollout_bank_path: results/banks/gpqa8b_p08_s80.json
+rollout_bank_set: B
+continuations_per_step: 4
+clean_logits_dtype: bfloat16
+
+algorithm_kwargs:
+  mattr_temperature: 0.5        # T of sigmoid((score - tau) / T)
+  mattr_k_schedule: uniform     # or: log
+  bank_eval_every: 500          # binary top-k masks scored on the whole bank -> bank_topk_eval.jsonl
+  mattr_snapshot_steps: [1000, 2000]   # scores after N steps -> score_snapshots.npz
+  # mattr_init_mask_path: results/thought_anchors/gpqa8b_p08_s80_thought_anchors.json   # start from another ranking
+  # mattr_init_scale: 2.0
+
+output_dir: results/matryoshka/masks
+file_name: gpqa8b_p08_s80

@@ -81,6 +81,7 @@ A typical layout is a shared base, plus one small file per run that sets only wh
 | `configs/answer_kl/gpqa8b_p08_s80_tsp40.yaml` | answer preservation, Qwen3-8B, stored suffix |
 | `configs/answer_kl/gpqa32b_p00_s80_tsp40.yaml` | answer preservation, Qwen3-32B |
 | `configs/answer_kl_bank/gpqa8b_p08_s80_tsp40.yaml` | answer preservation on sampled continuations, initialised from the baseline |
+| `configs/matryoshka/gpqa8b_p08_s80.yaml` | answer preservation with Matryoshka attribution: one ordering for every sparsity |
 | `configs/correct_answer/gpqa8b_p08_s80_tsp40.yaml` | correct-answer probability |
 | `configs/shortening/aqua_p004_s198_tsp40.yaml` | shortening |
 
@@ -262,6 +263,21 @@ uv run python -m expts.direct_answer_circuit_discovery.run --config configs/answ
 ```
 
 **Qwen3-32B.** Use `configs/answer_kl/gpqa32b_p00_s80_tsp40.yaml`, which sets `device: auto`. Make 2 GPUs visible.
+
+### One ordering for every sparsity (Matryoshka attribution)
+
+`nodewise_matryoshka_attribution` is a port of the optimiser of [Matryoshka attribution](https://github.com/aryamanarora/matryoshka-attribution) (Arora et al., 2026) to the sentence-pair masks of this repository. It is not part of the paper's results.
+
+- Each connection has one score, initialised at zero.
+- Every step draws a number of kept connections `k ~ Uniform(1, n)` and applies the sigmoid top-k mask of the scores at that `k`.
+- Adam minimises the task loss only. There is no sparsity penalty and no target sparsity.
+- One run gives an ordering of the connections. The evaluators threshold it at any sparsity.
+
+```bash
+uv run python -m expts.direct_answer_circuit_discovery.run --config configs/matryoshka/gpqa8b_p08_s80.yaml
+```
+
+The run writes the ordering to `<output_dir>/<file_name>.json`. Next to it, `<file_name>/bank_topk_eval.jsonl` has the loss of the binary top-k mask on the training bank at 12 sparsities every `bank_eval_every` steps, and `<file_name>/score_snapshots.npz` has the scores at the steps listed in `mattr_snapshot_steps`. The trainer is `utils/circuit_discovery/edits/nodewise_matryoshka_attribution.py`; its tensor-level tests are in `tests/test_matryoshka_attribution.py`.
 
 ## 3. Correct-answer probability
 

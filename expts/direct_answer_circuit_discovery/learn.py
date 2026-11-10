@@ -535,6 +535,7 @@ def main(
         "nodewise_straight_through_topk",
         "nodewise_deterministic_continuous",
         "nodewise_subnetwork_probing_candidate_rollouts",
+        "nodewise_matryoshka_attribution",
         "column_subnetwork_probing",
         "nodewise_activation_patching_flash",
         "nodewise_attribution_sdpa",

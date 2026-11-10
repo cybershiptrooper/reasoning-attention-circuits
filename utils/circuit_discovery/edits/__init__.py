@@ -59,6 +59,9 @@ from utils.circuit_discovery.edits.nodewise_deterministic_mask_trainers import (
 from utils.circuit_discovery.edits.nodewise_subnetwork_probing_candidate_rollouts import (
     NodewiseSubnetworkProbingCandidateRollouts,
 )
+from utils.circuit_discovery.edits.nodewise_matryoshka_attribution import (
+    NodewiseMatryoshkaAttribution,
+)
 
 register_patching_method(
     NodewiseActivationPatchingKVCache, "nodewise_activation_patching_kv_cache"
@@ -133,4 +136,7 @@ register_patching_method(
 register_patching_method(
     NodewiseSubnetworkProbingCandidateRollouts,
     "nodewise_subnetwork_probing_candidate_rollouts",
+)
+register_patching_method(
+    NodewiseMatryoshkaAttribution, "nodewise_matryoshka_attribution",
 )
